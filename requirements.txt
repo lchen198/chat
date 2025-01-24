@@ -10,3 +10,5 @@ livekit-api # livekit API
 python-dotenv # .env file parser
 rich # rich text formatting
 requests # HTTP requests
+
+flask_dance

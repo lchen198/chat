@@ -1,7 +1,9 @@
 from dotenv import load_dotenv
+from typing import Callable, TypeVar, ParamSpec
+import functools
 
 load_dotenv()
-from flask import Flask, session, request, render_template
+from flask import Flask, session, request, render_template, url_for, redirect
 from core.config import APP_SECRET_KEY, LLM_MODEL, PRIVATE_ROLES_PATTERN_MATCH, SHOW_PRIVATE_ROLES
 
 from extensions import socketio
@@ -12,14 +14,21 @@ from werkzeug.utils import secure_filename
 import datetime
 
 from openai import OpenAI
+from flask_dance.contrib.google import make_google_blueprint, google
 
 app = Flask(__name__)
 app.secret_key = APP_SECRET_KEY
+app.config["GOOGLE_OAUTH_CLIENT_ID"] = os.environ.get("GOOGLE_OAUTH_CLIENT_ID")
+app.config["GOOGLE_OAUTH_CLIENT_SECRET"] = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET")
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 
 socketio.init_app(app)
 
 roles = []
+
+google_bp = make_google_blueprint(scope=["https://www.googleapis.com/auth/userinfo.email", 
+                                         "https://www.googleapis.com/auth/userinfo.profile", "openid"])
+app.register_blueprint(google_bp, url_prefix="/login")
 
 
 def load_roles(show_private=SHOW_PRIVATE_ROLES):
@@ -43,17 +52,49 @@ def load_roles(show_private=SHOW_PRIVATE_ROLES):
     # sort roles by name
     roles = sorted(roles, key=lambda x: x["name"])
 
+P = ParamSpec("P")
+R = TypeVar("R")
+
+def authed(func: Callable[P, R]) -> Callable[P, R]:
+    @functools.wraps(func)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        if not google.authorized:
+            return redirect(url_for("google.login"))
+
+        resp = google.get("/oauth2/v1/userinfo")
+
+        email = resp.json()["email"]
+
+        # check if the user's email ends with the domain
+        if not email.endswith("mighty.coupons"):
+            return {"error": "Unauthorized"}, 401
         
+        # do something before
+        return func(*args, **kwargs)
+    return wrapper
         
         
 
 
 @app.route("/", methods=["GET"])
+@authed
 def home():
+    if not google.authorized:
+        return redirect(url_for("google.login"))
+
+    resp = google.get("/oauth2/v1/userinfo")
+
+    email = resp.json()["email"]
+
+    # check if the user's email ends with the domain
+    if not email.endswith("mighty.coupons"):
+        return {"error": "Unauthorized"}, 401
+
     load_roles()
     return render_template("index.html", roles = roles)
 
 @app.route("/run/<role>", methods=["GET"])
+@authed
 def role_route(role):
     try:
         global roles
@@ -74,6 +115,7 @@ def private_role(role):
         return {"error": str(e)}, 500
 
 @app.route("/api/agent/auth", methods=["GET"])
+@authed
 def get_token():
     timestamp = datetime.datetime.now().strftime("%y%m%d%H%M")
     if "user_id" not in session:
@@ -110,6 +152,7 @@ def get_token():
 
 # an api to match the conversation transcription with the blog tags
 @app.route("/api/recap", methods=["POST"])
+@authed
 def recap():
     try:
         data = request.json
@@ -141,6 +184,7 @@ def recap():
         return {"error": str(e)}, 500
 
 @app.route("/api/save", methods=["POST"])
+@authed
 def save():
     try:
         data = request.json

@@ -188,6 +188,7 @@ class Agent:
 
         logger.info(f"<<<--•••-->>> participant attributes: {participant.attributes}")
 
+        await wait_for_participant_attribute(self, participant, "role")
         self.role = participant.attributes.get("role", None)
 
         remote_identity = participant.identity
@@ -197,7 +198,6 @@ class Agent:
         self.run_multimodal_agent(ctx, participant)
 
         logger.info("agent started")
-
 
     def run_multimodal_agent(self, ctx: JobContext, participant: rtc.Participant):
 
@@ -221,7 +221,7 @@ class Agent:
         # if there is a functions.py in the role folder, override the functions
         if self.role:
             if os.path.exists(f"roles/{self.role}/functions.py"):
-                logger.info(f"🧙👋 Loading custom functions from {self.role}/functions.py")
+                logger.info(f"Loading custom functions from {self.role}/functions.py")
                 # first check if there is only one class in the file
                 with open(f"roles/{self.role}/functions.py") as f:
                     lines = f.readlines()
@@ -233,7 +233,7 @@ class Agent:
                 # import the class
                 module = __import__(f"roles.{self.role.replace('/', '.')}.functions", fromlist=[class_name])
                 functions = getattr(module, class_name)(ctx)
-                logger.info(f"🧙✅ Custom functions loaded from {self.role}/functions.py")
+                logger.info(f"Custom functions loaded from {self.role}/functions.py")
 
 
         assistant = MultimodalAgent(
@@ -411,7 +411,7 @@ class Agent:
 
     def run_agent(self):
         try:
-            print("[bold green]✨🧙 Starting agent...[/bold green]")
+            print("[bold green]-- Starting agent...[/bold green]")
             cli.run_app(
                 WorkerOptions(
                     entrypoint_fnc=self.entrypoint, 
@@ -422,8 +422,16 @@ class Agent:
                     )
                 )
         finally:
-            print("[bold red]✨🧙 Agent stopped...[/bold red]")
+            print("[bold red]-- Agent stopped...[/bold red]")
 
+
+async def wait_for_participant_attribute(self, participant: rtc.RemoteParticipant, attribute: str):
+    while True:
+        role = participant.attributes.get(attribute, None)
+
+        if role is not None:
+            return
+        await asyncio.sleep(0.1)
 
 
 if __name__ == "__main__":
